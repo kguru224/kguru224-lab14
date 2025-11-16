@@ -5,99 +5,111 @@ import java.util.*;
 
 public class Server {
     private ServerSocket serverSocket;
-    private ArrayList<LocalDateTime> connectedTimes = new ArrayList<>();
+    private ArrayList<LocalDateTime> connectedTimes;
+    private static final String HANDSHAKE_KEY = "12345";
 
-    public Server(int port){
+    public Server(int port) throws IOException {
+        serverSocket = new ServerSocket(port);
+        connectedTimes = new ArrayList<>();
+    }
+
+    public void serve(int numClients) {
+        for (int i = 0; i < numClients; i++) {
+            try {
+                Socket clientSocket = serverSocket.accept();
+                LocalDateTime connectionTime = LocalDateTime.now();
+                
+                // Handle handshake in a separate thread
+                Thread clientThread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                            PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                            
+                            // Perform handshake
+                            String handshake = in.readLine();
+                            if (handshake == null || !handshake.equals(HANDSHAKE_KEY)) {
+                                out.println("couldn't handshake");
+                                out.flush();
+                                clientSocket.close();
+                                return;
+                            }
+                            
+                            // Record connection time after successful handshake
+                            synchronized (connectedTimes) {
+                                connectedTimes.add(connectionTime);
+                            }
+                            
+                            // Process client request
+                            String numberStr = in.readLine();
+                            if (numberStr != null) {
+                                String response = factorize(numberStr);
+                                out.println(response);
+                                out.flush();
+                            }
+                            
+                            in.close();
+                            out.close();
+                            clientSocket.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+                
+                clientThread.start();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private String factorize(String numberStr) {
         try {
-            serverSock = new ServerSocket(port);
-        }
-        catch(IOException e){
-            System.err.println("Cannot establish server socket");
-            System.exit(1);
+            long number = Long.parseLong(numberStr);
+            
+            // Check if number is too large (greater than Integer.MAX_VALUE)
+            if (number > Integer.MAX_VALUE) {
+                return "There was an exception on the server";
+            }
+            
+            int count = countFactors((int) number);
+            return "The number " + number + " has " + count + " factors";
+        } catch (NumberFormatException | ArithmeticException e) {
+            return "There was an exception on the server";
         }
     }
 
-    public void serve(int numClients){
-        int served = 0;
-        while(served < numClients){
-            try{
-                Socket clientSock = serverSock.accept();
-                connectedTimes.add(LocalDateTime.now());
-                System.out.println("New connection: " + clientSock.getRemoteSocketAddress());
-                (new ClientHandler(clientSock)).start();
-                served++;
-            }
-            catch(IOException e){
-                System.err.println("Error during accepting a connection");
-            }
-
+    private int countFactors(int n) {
+        if (n <= 0) {
+            return 0;
         }
-        
+        int count = 0;
+        for (int i = 1; i <= n; i++) {
+            if (n % i == 0) {
+                count++;
+            }
+        }
+        return count;
     }
 
-    public ArrayList<LocalDateTime> getConnectedTimes(){
-        ArrayList<Integer> factors = new ArrayList<>();
-        for(int i = 2; i <= n / i; i++){
-            while(n % i == 0){
-                factors.add(i);
-                n /= i;
-            }
-        }
-
-        if(n > 1){
-            return factors;
+    public ArrayList<LocalDateTime> getConnectedTimes() {
+        synchronized (connectedTimes) {
+            ArrayList<LocalDateTime> sorted = new ArrayList<>(connectedTimes);
+            Collections.sort(sorted);
+            return sorted;
         }
     }
 
-    private class ClientHandler extends Thread{
-        private Socket sock;
-
-        public ClientHandler(Socket sock){
-            this.sock = sock;
-
-        }
-    }
-
-    public void run(){
-        try{
-            PrintWriter out = new PrintWriter(sock.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
-
-            String key = in.readLine();
-            if(!"12345".equals(key)){
-                out.println("INVALID");
-                sock.close();
-                return;
+    public void disconnect() {
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
             }
-
-            else{
-                out.println("CONNECTED");
-            }
-
-            String message = in.readLine();
-            if(message != null){
-                try{
-                    int num = Integer.pasrseInt(message);
-                    ArrayList<Integer> factors = factorize(num);
-                    out.println(factors.toString());
-                }
-                catch(NumberFormatException e){
-                    out.println("Error: Invalid number");
-                }
-
-            }
-
-            out.close();
-            in.close();
-            sock.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-        catch(IOException e){
-            System.err.println("Error in client handler");
-        }
-    }
-
-    public static void main(String[] args){
-        Server server = new Server(2021);
-        server.serve(3);
     }
 }
+
